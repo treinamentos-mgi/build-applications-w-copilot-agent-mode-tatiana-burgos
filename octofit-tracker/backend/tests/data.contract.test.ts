@@ -12,6 +12,18 @@ describe('Contrato de dados do OctoFit', () => {
     expect(error?.errors.email).toBeDefined();
     expect(error?.errors.fitnessGoal).toBeDefined();
   });
+  it('impede dois registros de pessoas usuárias com o mesmo e-mail', async () => {
+    const mongo = await MongoMemoryServer.create();
+    try {
+      await mongoose.connect(mongo.getUri());
+      await User.init();
+      await User.create({ name: 'Mona', email: 'duplicado@example.com', fitnessGoal: 'endurance' });
+      await expect(User.create({ name: 'Hubot', email: 'duplicado@example.com', fitnessGoal: 'strength' })).rejects.toMatchObject({ code: 11000 });
+    } finally {
+      await mongoose.disconnect();
+      await mongo.stop();
+    }
+  }, 60_000);
   it('exige nome, mascote e lista de integrantes nas equipes', () => {
     const team = new Team({ name: 'Octocats', mascot: 'Mona', members: [] });
     expect(team.validateSync()).toBeUndefined();
