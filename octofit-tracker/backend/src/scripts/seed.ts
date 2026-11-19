@@ -2,80 +2,69 @@ import { connectDatabase, disconnectDatabase } from '../config/database.js';
 import { Activity, Team, User, Workout } from '../models/index.js';
 
 // Insere registros de demonstração estáveis sem apagar dados da aplicação.
-async function upsertDemoUser(name: string, email: string, teamId: InstanceType<typeof Team>['_id'], fitnessGoal: string) {
-  const previousUser = await User.findOne({ email }).select('_id team');
+async function upsertDemoUser(fixtureKey: string, name: string, email: string, teamId: InstanceType<typeof Team>['_id'], fitnessGoal: string) {
+  const fixtureFilter = { $or: [{ fixtureKey }, { email }] };
+  const previousUser = await User.findOne(fixtureFilter).select('_id team');
   if (previousUser?.team && previousUser.team.toString() !== teamId.toString()) {
     await Team.updateOne({ _id: previousUser.team }, { $pull: { members: previousUser._id } });
   }
   const user = await User.findOneAndUpdate(
-    { email },
-    { $set: { name, email, team: teamId, fitnessGoal } },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
+    fixtureFilter,
+    { $set: { fixtureKey, name, email, team: teamId, fitnessGoal } },
+    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
   );
   await Team.updateOne({ _id: teamId }, { $addToSet: { members: user._id } });
   return user;
 }
 
+async function upsertDemoTeam(fixtureKey: string, name: string, mascot: string) {
+  return Team.findOneAndUpdate(
+    { $or: [{ fixtureKey }, { name, mascot }] },
+    { $set: { fixtureKey, name, mascot } },
+    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
+  );
+}
+
+async function upsertDemoWorkout(fixtureKey: string, title: string, focus: string, minutes: number, difficulty: string) {
+  return Workout.findOneAndUpdate(
+    { $or: [{ fixtureKey }, { title, focus }] },
+    { $set: { fixtureKey, title, focus, minutes, difficulty } },
+    { upsert: true, new: true, setDefaultsOnInsert: true, runValidators: true },
+  );
+}
+
 export async function seed() {
   await connectDatabase();
   try {
-    const octocats = await Team.findOneAndUpdate(
-      { name: 'Octocats' },
-      { $set: { name: 'Octocats', mascot: 'Mona' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    const robocats = await Team.findOneAndUpdate(
-      { name: 'Robocats' },
-      { $set: { name: 'Robocats', mascot: 'Hubot' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    const codecats = await Team.findOneAndUpdate(
-      { name: 'Codecats' },
-      { $set: { name: 'Codecats', mascot: 'Copilot' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    await Team.findOneAndUpdate(
-      { name: 'Pandacats' },
-      { $set: { name: 'Pandacats', mascot: 'Panda' } },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
-    );
-    const mona = await upsertDemoUser('Mona', 'mona@example.com', octocats._id, 'endurance');
-    const hubot = await upsertDemoUser('Hubot', 'hubot@example.com', robocats._id, 'strength');
-    const copilot = await upsertDemoUser('Copilot', 'copilot@example.com', codecats._id, 'mobility');
+    const octocats = await upsertDemoTeam('demo:team:octocats', 'Octocats', 'Mona');
+    const robocats = await upsertDemoTeam('demo:team:robocats', 'Robocats', 'Hubot');
+    const codecats = await upsertDemoTeam('demo:team:codecats', 'Codecats', 'Copilot');
+    await upsertDemoTeam('demo:team:pandacats', 'Pandacats', 'Panda');
+    const mona = await upsertDemoUser('demo:user:mona', 'Mona', 'mona@example.com', octocats._id, 'endurance');
+    const hubot = await upsertDemoUser('demo:user:hubot', 'Hubot', 'hubot@example.com', robocats._id, 'strength');
+    const copilot = await upsertDemoUser('demo:user:copilot', 'Copilot', 'copilot@example.com', codecats._id, 'mobility');
 
     const monaRunAt = new Date('2026-01-10T12:00:00.000Z');
     const hubotCycleAt = new Date('2026-01-11T12:00:00.000Z');
     const copilotStrengthAt = new Date('2026-01-12T12:00:00.000Z');
     await Activity.updateOne(
-      { user: mona._id, team: octocats._id, type: 'run', occurredAt: monaRunAt },
-      { $set: { user: mona._id, team: octocats._id, type: 'run', minutes: 40, points: 40, occurredAt: monaRunAt } },
-      { upsert: true },
+      { $or: [{ fixtureKey: 'demo:activity:mona:run:2026-01-10' }, { user: mona._id, team: octocats._id, type: 'run', occurredAt: monaRunAt }] },
+      { $set: { fixtureKey: 'demo:activity:mona:run:2026-01-10', user: mona._id, team: octocats._id, type: 'run', minutes: 40, points: 40, occurredAt: monaRunAt } },
+      { upsert: true, runValidators: true },
     );
     await Activity.updateOne(
-      { user: hubot._id, team: robocats._id, type: 'cycle', occurredAt: hubotCycleAt },
-      { $set: { user: hubot._id, team: robocats._id, type: 'cycle', minutes: 25, points: 25, occurredAt: hubotCycleAt } },
-      { upsert: true },
+      { $or: [{ fixtureKey: 'demo:activity:hubot:cycle:2026-01-11' }, { user: hubot._id, team: robocats._id, type: 'cycle', occurredAt: hubotCycleAt }] },
+      { $set: { fixtureKey: 'demo:activity:hubot:cycle:2026-01-11', user: hubot._id, team: robocats._id, type: 'cycle', minutes: 25, points: 25, occurredAt: hubotCycleAt } },
+      { upsert: true, runValidators: true },
     );
     await Activity.updateOne(
-      { user: copilot._id, team: codecats._id, type: 'strength', occurredAt: copilotStrengthAt },
-      { $set: { user: copilot._id, team: codecats._id, type: 'strength', minutes: 20, points: 20, occurredAt: copilotStrengthAt } },
-      { upsert: true },
+      { $or: [{ fixtureKey: 'demo:activity:copilot:strength:2026-01-12' }, { user: copilot._id, team: codecats._id, type: 'strength', occurredAt: copilotStrengthAt }] },
+      { $set: { fixtureKey: 'demo:activity:copilot:strength:2026-01-12', user: copilot._id, team: codecats._id, type: 'strength', minutes: 20, points: 20, occurredAt: copilotStrengthAt } },
+      { upsert: true, runValidators: true },
     );
-    await Workout.updateOne(
-      { title: 'Intervalos' },
-      { $set: { title: 'Intervalos', focus: 'endurance', minutes: 30, difficulty: 'moderate' } },
-      { upsert: true },
-    );
-    await Workout.updateOne(
-      { title: 'Circuito de força' },
-      { $set: { title: 'Circuito de força', focus: 'strength', minutes: 30, difficulty: 'moderate' } },
-      { upsert: true },
-    );
-    await Workout.updateOne(
-      { title: 'Mobilidade e alongamento' },
-      { $set: { title: 'Mobilidade e alongamento', focus: 'mobility', minutes: 20, difficulty: 'easy' } },
-      { upsert: true },
-    );
+    await upsertDemoWorkout('demo:workout:intervalos', 'Intervalos', 'endurance', 30, 'moderate');
+    await upsertDemoWorkout('demo:workout:circuito-de-forca', 'Circuito de força', 'strength', 30, 'moderate');
+    await upsertDemoWorkout('demo:workout:mobilidade-e-alongamento', 'Mobilidade e alongamento', 'mobility', 20, 'easy');
   } finally {
     await disconnectDatabase();
   }

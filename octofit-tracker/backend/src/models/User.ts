@@ -1,10 +1,18 @@
 import { Schema, model } from 'mongoose';
 
 const userSchema = new Schema({
-  name: { type: String, required: [true, 'Nome é obrigatório'] },
-  email: { type: String, required: [true, 'E-mail é obrigatório'], unique: true },
+  fixtureKey: { type: String, trim: true, select: false, unique: true, sparse: true },
+  name: { type: String, required: [true, 'Nome é obrigatório'], trim: true, minlength: 1 },
+  email: {
+    type: String,
+    required: [true, 'E-mail é obrigatório'],
+    trim: true,
+    lowercase: true,
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'E-mail inválido'],
+    unique: true,
+  },
   team: { type: Schema.Types.ObjectId, ref: 'Team' },
-  fitnessGoal: { type: String, required: [true, 'Meta de condicionamento é obrigatória'] },
+  fitnessGoal: { type: String, required: [true, 'Meta de condicionamento é obrigatória'], trim: true, minlength: 1 },
 });
 
 export const User = model('User', userSchema);

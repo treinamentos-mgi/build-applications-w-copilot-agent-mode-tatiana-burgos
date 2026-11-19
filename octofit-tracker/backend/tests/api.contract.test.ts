@@ -40,6 +40,8 @@ describe('Contrato da API do OctoFit', () => {
       expect(response.status).toBeGreaterThanOrEqual(400);
       expect(response.status).toBeLessThan(500);
     }
+    const invalidMinutes = await request(app).post('/api/activities').send({ userId: user._id.toString(), teamId: team._id.toString(), type: 'run', minutes: 0 });
+    expect(invalidMinutes.status).toBe(400);
     expect(await Activity.countDocuments()).toBe(0);
     const created = await request(app).post('/api/activities').send({ userId: user._id.toString(), teamId: team._id.toString(), type: 'run', minutes: 30 });
     expect(created.status).toBe(201);
@@ -47,7 +49,7 @@ describe('Contrato da API do OctoFit', () => {
     expect(listed.body.activities).toHaveLength(1);
     for (const activity of [created.body.activity, listed.body.activities[0]]) {
       expect(activity).toMatchObject({ user: user._id.toString(), team: team._id.toString(), type: 'run', minutes: 30 });
-      expect(activity.points).toBeGreaterThan(0);
+      expect(activity.points).toBe(30);
       expect(Number.isNaN(Date.parse(activity.occurredAt))).toBe(false);
     }
   });
@@ -62,20 +64,31 @@ describe('Contrato da API do OctoFit', () => {
     expect(listed.body.teams).toHaveLength(1);
     expect(listed.body.teams[0]).toMatchObject({ name: 'Octocats', mascot: 'Mona' });
     expect(listed.body.teams[0].members.map((id: string) => id.toString())).toContain(member._id.toString());
+    const updatedMember = await User.findById(member._id);
+    expect(updatedMember?.team?.toString()).toBe(created.body.team._id);
+
+    const duplicateMembership = await request(app).post('/api/teams').send({ name: 'Robocats', mascot: 'Hubot', members: [member._id.toString()] });
+    expect(duplicateMembership.status).toBe(409);
+    expect(await Team.countDocuments()).toBe(1);
   });
   it('ordena o placar pela pontuação total', async () => {
     const mona = await createUserAndTeam('Mona', 'mona@example.com', 'Mona', 'Octocats');
     const hubot = await createUserAndTeam('Hubot', 'hubot@example.com', 'Hubot', 'Robocats');
+    const alex = await createUserAndTeam('Alex', 'alex@example.com', 'Alex', 'Aardvarks');
+    await Team.create({ name: 'Zebras', mascot: 'Zebra' });
     await Activity.create([
       { user: mona.user._id, team: mona.team._id, type: 'run', minutes: 25, points: 25, occurredAt: new Date() },
       { user: hubot.user._id, team: hubot.team._id, type: 'cycle', minutes: 20, points: 20, occurredAt: new Date() },
       { user: hubot.user._id, team: hubot.team._id, type: 'strength', minutes: 15, points: 15, occurredAt: new Date() },
+      { user: alex.user._id, team: alex.team._id, type: 'run', minutes: 25, points: 25, occurredAt: new Date() },
     ]);
     const response = await request(app).get('/api/leaderboard');
     expect(response.status).toBe(200);
     expect(response.body.leaderboard.map(({ teamName, totalPoints, rank }: { teamName: string; totalPoints: number; rank: number }) => ({ teamName, totalPoints, rank }))).toEqual([
       { teamName: 'Robocats', totalPoints: 35, rank: 1 },
+      { teamName: 'Aardvarks', totalPoints: 25, rank: 2 },
       { teamName: 'Octocats', totalPoints: 25, rank: 2 },
+      { teamName: 'Zebras', totalPoints: 0, rank: 4 },
     ]);
   });
   it('sugere treinos compatíveis com o padrão de atividade de cada pessoa', async () => {
@@ -102,5 +115,17 @@ describe('Contrato da API do OctoFit', () => {
     const unknownResponse = await request(app).get('/api/workouts/suggestions/nobody%40example.com');
     expect(unknownResponse.status).toBeGreaterThanOrEqual(400);
     expect(unknownResponse.status).toBeLessThan(500);
+
+    const ada = await createUserAndTeam('Ada', 'ada@example.com', 'Ada');
+    await User.updateOne({ _id: ada.user._id }, { $set: { fitnessGoal: 'flexibility' } });
+    await Activity.create({ user: ada.user._id, team: ada.team._id, type: 'strength', minutes: 20, points: 20, occurredAt: new Date() });
+    const historyFallback = await request(app).get('/api/workouts/suggestions/ada%40example.com');
+    expect(historyFallback.body.suggestions[0]).toMatchObject({ title: 'Circuito de força', focus: 'strength' });
+
+    const noMatch = await createUserAndTeam('Nora', 'nora@example.com', 'Nora');
+    await User.updateOne({ _id: noMatch.user._id }, { $set: { fitnessGoal: 'flexibility' } });
+    const emptyResponse = await request(app).get('/api/workouts/suggestions/nora%40example.com');
+    expect(emptyResponse.status).toBe(200);
+    expect(emptyResponse.body.suggestions).toEqual([]);
   });
 });
